@@ -1,4 +1,6 @@
 #include "EmonLib.h"
+#include <avr/pgmspace.h>
+
 EnergyMonitor emon1;
 EnergyMonitor emon2;
 EnergyMonitor emon3;
@@ -41,6 +43,27 @@ EnergyMonitor emon3;
 // Uncomment the following line to enable analog value logging for debugging signal issues
 //#define DEBUG
 
+// StreamPrint code from http://www.utopiamechanicus.com/article/low-memory-serial-print/
+void StreamPrint_progmem(Print &out,PGM_P format,...)
+{
+  // program memory version of printf - copy of format string and result share a buffer
+  // so as to avoid too much memory use
+  char formatString[200], *ptr;
+  strncpy_P( formatString, format, sizeof(formatString) ); // copy in from program mem
+  // null terminate - leave last char since we might need it in worst case for result's \0
+  formatString[ sizeof(formatString)-2 ]='\0'; 
+  ptr=&formatString[ strlen(formatString)+1 ]; // our result buffer...
+  va_list args;
+  va_start (args,format);
+  vsnprintf(ptr, sizeof(formatString)-1-strlen(formatString), formatString, args );
+  va_end (args);
+  formatString[ sizeof(formatString)-1 ]='\0'; 
+  out.print(ptr);
+}
+ 
+#define Serialprint(format, ...) StreamPrint_progmem(Serial,PSTR(format),##__VA_ARGS__)
+#define Streamprint(stream,format, ...) StreamPrint_progmem(stream,PSTR(format),##__VA_ARGS__)
+
 class Tool
 {
   public:
@@ -51,9 +74,8 @@ class Tool
     {
       pin = _pin;
       mon.current(pin, ICAL);
-      
-      Serial.print("New tool on pin: ");
-      Serial.println(pin, DEC);
+
+      Serialprint("New tool on pin: %d\r\n", pin);
     }
 };
 
@@ -104,12 +126,7 @@ void loop()
     {
       int val = analogRead(tools[i].pin);
       double cur = tools[i].mon.calcIrms(IRMS_SAMPLES);
-      Serial.print("Tool ");
-      Serial.print(i + 1, DEC);
-      Serial.print(" analog value: ");
-      Serial.print(val, DEC);
-      Serial.print(" current: ");
-      Serial.println(cur, DEC);
+      Serialprint("Tool: %d analog: %d current: %d\r\n", i + 1, val, (int)cur);
     }
   #endif
   
@@ -127,10 +144,7 @@ void loop()
       double current = tools[i].mon.calcIrms(IRMS_SAMPLES);
       if (current > CURRENT_THRESHOLD)
       {
-        Serial.print("Tool is powered on: ");
-        Serial.print(i + 1, DEC);
-        Serial.print(" current: ");
-        Serial.println(current, DEC);
+        Serialprint("Tool on: %d current: %d\r\n", i + 1, (int)current);
         newPowerState = ON;
       }
     }
@@ -145,9 +159,7 @@ void changePowerState(bool newPowerState)
   {
     if (powerOffTime != 0)
     {
-      Serial.print("changePowerState called with state already at ");
-      Serial.print(powerState, DEC);
-      Serial.println(" resetting powerOffTime");
+      Serialprint("changePowerState state: %d resetting powerOffTime\r\n", powerState);
       powerOffTime = 0;
 
       // Turn the power LED back on as we won't be shutting down
@@ -163,10 +175,7 @@ void changePowerState(bool newPowerState)
     {
       // This is the first call to turn off, set powerOffTime to the current time and return
       powerOffTime = millis() + POWER_OFF_DELAY_MS;
-      Serial.print("Set powerOffTime to ");
-      Serial.print(powerOffTime, DEC);
-      Serial.print(" current time is ");
-      Serial.println(millis(), DEC);
+      Serialprint("powerOffTime: %d current time: %d\r\n", powerOffTime, millis());
 
       // Turn off the LED to indicate power off sequence has begun
       digitalWrite(POWER_LED_PIN, LOW);
@@ -175,23 +184,16 @@ void changePowerState(bool newPowerState)
     }
     else if (powerOffTime > millis())
     {
-      Serial.print("Not turning off yet, powerOffTime=");
-      Serial.print(powerOffTime, DEC);
-      Serial.print(" currentTime=");
-      Serial.println(millis(), DEC);
+      Serialprint("Don't turn off, powerOffTime: %d currentTime: %d\r\n", powerOffTime, millis());
       return;
     }
     else
     {
-      Serial.print("powerOffTime has been reached, turning off. powerOffTime=");
-      Serial.print(powerOffTime, DEC);
-      Serial.print(" currentTime=");
-      Serial.println(millis(), DEC);
+      Serialprint("powerOffTime reached, turning off. powerOffTime: %d currentTime: %d\r\n", powerOffTime, millis());
     }
   }
 
-  Serial.print("Changing power state to ");
-  Serial.println(newPowerState, DEC);
+  Serialprint("Changing power state to %d\r\n", newPowerState);
   
   digitalWrite(RELAY_PIN, newPowerState == ON ? HIGH : LOW);
   digitalWrite(POWER_LED_PIN, newPowerState == ON ? HIGH : LOW);
@@ -201,6 +203,10 @@ void changePowerState(bool newPowerState)
 
 void buttonInterrupt()
 {
+  #ifdef DEBUG
+    Serialprint("Button interrupt\r\n");
+  #endif
+  
   if (digitalRead(SWITCH_PIN) == SWITCH_ON)
   {
     manualOverride = ON;
